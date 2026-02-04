@@ -6,7 +6,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 5177 --strictPort",
     "build": "vite build",
     "preview": "vite preview",
     "netlify:dev": "netlify dev --functions=netlify/functions"
@@ -24,3 +24,4 @@
     "vite": "^5.4.2"
   }
 }
+

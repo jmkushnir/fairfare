@@ -1,29 +1,16 @@
-// src/lib/api.js
+﻿export async function planFlights({ from, to, departDate, returnDate, adults = 1 }) {
+  const qs = new URLSearchParams();
+  qs.set("origin", from);
+  qs.set("destination", to);
+  qs.set("departureDate", departDate);
+  if (returnDate) qs.set("returnDate", returnDate);
+  if (adults) qs.set("adults", String(adults));
 
-export async function planFlights({ from, to, departDate, returnDate }) {
-  const res = await fetch("/.netlify/functions/planFlights", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to, departDate, returnDate })
-  });
+  const res = await fetch(`/.netlify/functions/planFlights?${qs.toString()}`, { method: "GET" });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload?.error || `planFlights failed: ${res.status}`);
 
-  // Always read text first so we can show useful errors
-  const text = await res.text();
-
-  if (!res.ok) {
-    // Return a clear error message (and keep it as a normal JS Error)
-    throw new Error(text || `planFlights failed: HTTP ${res.status}`);
-  }
-
-  // Handle empty/invalid JSON safely
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch (e) {
-    throw new Error(`planFlights returned invalid JSON: ${text.slice(0, 200)}`);
-  }
-
-  // Amadeus flight offers response is usually { data: [...] }
-  // We return the offers list directly for the UI.
-  return json.data || [];
+  // Your function returns: { type, version, data: { ranked_options: [...] } }
+  const offers = payload?.data?.ranked_options;
+  return Array.isArray(offers) ? offers : [];
 }

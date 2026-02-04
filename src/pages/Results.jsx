@@ -1,117 +1,103 @@
-// src/pages/Results.jsx
-import React, { useEffect, useState } from "react";
-import { planFlights } from "../lib/api";
+﻿import React from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { planFlights } from "../lib/api.js";
 
-function formatSegment(seg) {
-  if (!seg) return "No segment";
-  const dep = `${seg.departure.iataCode} ${seg.departure.at}`;
-  const arr = `${seg.arrival.iataCode} ${seg.arrival.at}`;
-  const flight = `${seg.carrierCode}${seg.number}`;
-  return `${dep} → ${arr} (${flight})`;
+function formatStops(n) {
+  if (n === 0) return "Nonstop";
+  if (n === 1) return "1 stop";
+  return `${n} stops`;
 }
 
-function formatItinerary(itin) {
-  if (!itin || !Array.isArray(itin.segments) || itin.segments.length === 0) {
-    return "No itinerary";
-  }
-  const first = itin.segments[0];
-  const last = itin.segments[itin.segments.length - 1];
-  if (itin.segments.length === 1) return formatSegment(first);
-  return `${formatSegment(first)} … ${formatSegment(last)}`;
+function moneyFromLabel(label) {
+  const m = String(label || "").match(/USD\s*([0-9]+(?:\.[0-9]+)?)/i);
+  return m ? `USD ${m[1]}` : String(label || "").replace(/ΓÇó|â€”|â€“/g, "•");
+}
+
+function niceTime(iso) {
+  if (!iso) return "";
+  // Keep it simple: show ISO without seconds
+  return String(iso).replace(":00Z", "").replace("T", " ");
 }
 
 export default function Results() {
-  const [offers, setOffers] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const nav = useNavigate();
+  const { state } = useLocation();
+  const search = state || {};
 
-  // ✅ Safe default values (replace later with your real search state/params if desired)
-  const search = {
-    from: "ATL",
-    to: "DEN",
-    departDate: "2026-02-16",
-    returnDate: "2026-02-20"
-  };
+  const [offers, setOffers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState("");
 
-  useEffect(() => {
+  React.useEffect(() => {
     let alive = true;
-
-    async function run() {
+    (async () => {
       setLoading(true);
-      setError("");
-      setOffers([]);
-
+      setErr("");
       try {
-        const list = await planFlights(search);
+        const list = await planFlights(search); // api.js returns ranked_options array
         if (!alive) return;
-        setOffers(list);
+        setOffers(Array.isArray(list) ? list : []);
       } catch (e) {
         if (!alive) return;
-        setError(e.message || String(e));
+        setErr(String(e?.message || e));
+        setOffers([]);
       } finally {
         if (!alive) return;
         setLoading(false);
       }
-    }
-
-    run();
+    })();
     return () => {
       alive = false;
     };
-  }, []);
+  }, []); // run once
+
+  const from = search.from || search.origin || "";
+  const to = search.to || search.destination || "";
+  const departDate = search.departDate || search.departureDate || "";
+  const returnDate = search.returnDate || "";
 
   return (
-    <div style={{ padding: 16 }}>
-      <h2>Results</h2>
-
-      <div style={{ marginBottom: 12 }}>
-        <div><b>From:</b> {search.from}</div>
-        <div><b>To:</b> {search.to}</div>
-        <div><b>Date:</b> {search.departDate}</div>
-        <div><b>Return:</b> {search.returnDate}</div>
+    <div style={{ maxWidth: 820, margin: "24px auto", padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <h1 style={{ margin: 0 }}>Results</h1>
+        <button onClick={() => nav("/")} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #ddd" }}>
+          Back
+        </button>
       </div>
 
-      {loading && <div>Searching…</div>}
+      <div style={{ marginTop: 10, padding: 12, border: "1px solid #eee", borderRadius: 12 }}>
+        <div><b>From:</b> {from || "—"}</div>
+        <div><b>To:</b> {to || "—"}</div>
+        <div><b>Date:</b> {departDate || "—"}</div>
+        <div><b>Return:</b> {returnDate || "—"}</div>
+      </div>
 
-      {error && (
-        <pre style={{ color: "crimson", whiteSpace: "pre-wrap" }}>
-          {error}
-        </pre>
+      {loading && <div style={{ marginTop: 14 }}>Loading flights…</div>}
+      {!!err && (
+        <div style={{ marginTop: 14, padding: 12, border: "1px solid #f5c2c7", background: "#f8d7da", borderRadius: 12 }}>
+          <b>Error:</b> {err}
+        </div>
       )}
 
-      {!loading && !error && offers.length === 0 && (
-        <div>No offers found.</div>
+      {!loading && !err && offers.length === 0 && (
+        <div style={{ marginTop: 14 }}>No offers found.</div>
       )}
 
-      <div style={{ display: "grid", gap: 12 }}>
-        {offers.map((offer) => {
-          const outbound = offer.itineraries?.[0];
-          const inbound = offer.itineraries?.[1]; // ✅ return leg is here
-
-          const price =
-            offer.price?.grandTotal ??
-            offer.price?.total ??
-            "—";
-
-          const currency = offer.price?.currency ?? "USD";
-          const airline = offer.validatingAirlineCodes?.[0] ?? "";
-
+      <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+        {offers.map((opt) => {
+          const s = opt?.summary || {};
           return (
-            <div
-              key={offer.id}
-              style={{
-                border: "1px solid #ddd",
-                borderRadius: 10,
-                padding: 12
-              }}
-            >
-              <div style={{ fontSize: 18, fontWeight: 700 }}>
-                {currency} {price} {airline ? `· ${airline}` : ""}
+            <div key={opt?.rank ?? `${s.from}-${s.to}-${s.depart_at}-${moneyFromLabel(opt?.label)}`}
+                 style={{ border: "1px solid #eee", borderRadius: 14, padding: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>{moneyFromLabel(opt?.label)}</div>
+              <div style={{ marginTop: 6 }}>
+                <b>{formatStops(s.stops)}</b> • {s.duration || ""} • {s.carrier ? `Carrier: ${s.carrier}` : ""}
               </div>
-
               <div style={{ marginTop: 8 }}>
-                <div><b>Outbound:</b> {formatItinerary(outbound)}</div>
-                <div><b>Return:</b> {inbound ? formatItinerary(inbound) : "No return itinerary found"}</div>
+                <div><b>Outbound:</b> {s.from} → {s.to}</div>
+                <div>
+                  {niceTime(s.depart_at)} → {niceTime(s.arrive_at)}
+                </div>
               </div>
             </div>
           );

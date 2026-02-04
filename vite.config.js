@@ -2,10 +2,10 @@
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  plugins: [react({ fastRefresh: false })],
+  plugins: [react()],
   server: {
-    host: "0.0.0.0",
-    port: 5175,
-    strictPort: true
+    port: 5177,
+    strictPort: true,
+    host: true
   }
 });
