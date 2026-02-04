@@ -1,0 +1,536 @@
+import { useMemo, useRef, useState } from "react";
+import { emptyTrip } from "../models/intakeDefaults";
+
+const defaultTraveler = {
+  label: "",
+  ageRange: "",
+  stamina: "",
+  assistance: [],
+  comfort: [],
+  timing: { avoidEarly: false, avoidLate: false, redEyeOk: false },
+  connections: { nonstopOnly: false, maxStops: 1, minLayoverMin: 90 },
+  pets: { hasPet: false, hasServiceAnimal: false, inCabinRequired: false },
+};
+
+export default function IntakeWizard() {
+  const initialTrip = useMemo(() => {
+    const t = emptyTrip ?? {};
+    const travelers =
+      Array.isArray(t.travelers) && t.travelers.length
+        ? t.travelers
+        : [defaultTraveler];
+    return { ...t, travelers };
+  }, []);
+
+  const [trip, setTrip] = useState(initialTrip);
+
+  // step: 0 route, 1 dates, 2 traveler flow, 99 review
+  const [step, setStep] = useState(0);
+
+  // traveler flow:
+  // Primary (index 0): label, age, stamina, assistance, comfort, timing/conn, add-another
+  // Others (index 1+): label, age, stamina, add-another
+  const [travelerIndex, setTravelerIndex] = useState(0);
+  const [tStep, setTStep] = useState(0);
+
+  const travelers = Array.isArray(trip.travelers)
+    ? trip.travelers
+    : [defaultTraveler];
+  const t0 = travelers[travelerIndex] ?? defaultTraveler;
+  const isPrimary = travelerIndex === 0;
+
+  // Date picker refs (for the big ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¦ buttons)
+  const departRef = useRef(null);
+  const returnRef = useRef(null);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const departMin = today;
+  const returnMin = trip.departDate || today;
+
+  const openPicker = (ref) => {
+    const el = ref?.current;
+    if (!el) return;
+    // Chrome/Edge support showPicker(); if not, focus works everywhere
+    if (typeof el.showPicker === "function") el.showPicker();
+    else el.focus();
+  };
+
+  const setTraveler = (patch) => {
+    const next = travelers.map((t, i) =>
+      i === travelerIndex ? { ...t, ...patch } : t
+    );
+    setTrip({ ...trip, travelers: next });
+  };
+
+  const toggle = (arr, v) => {
+    const a = arr ?? [];
+    return a.includes(v) ? a.filter((x) => x !== v) : [...a, v];
+  };
+
+  const setTiming = (patch) =>
+    setTraveler({
+      timing: { ...(t0.timing ?? defaultTraveler.timing), ...patch },
+    });
+
+  const setConnections = (patch) =>
+    setTraveler({
+      connections: { ...(t0.connections ?? defaultTraveler.connections), ...patch },
+    });
+
+  const toInt = (val, fallback) => {
+    const n = parseInt(val, 10);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  // ---------------- Trip steps ----------------
+  if (step === 0) {
+    return (
+      <div>
+        <h2>Where are you flying from and to?</h2>
+        <input
+          placeholder="From (e.g., PHX)"
+          value={trip.from || ""}
+          onChange={(e) => setTrip({ ...trip, from: e.target.value })}
+        />
+        <input
+          placeholder="To (e.g., LAX)"
+          value={trip.to || ""}
+          onChange={(e) => setTrip({ ...trip, to: e.target.value })}
+        />
+        <button disabled={!trip.from || !trip.to} onClick={() => setStep(1)}>
+          Next
+        </button>
+      </div>
+    );
+  }
+
+  // ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Date pickers step (improved icon visibility)
+  if (step === 1) {
+    const tripType = trip.tripType || "roundtrip";
+    const invalidReturn =
+      tripType === "roundtrip" &&
+      trip.returnDate &&
+      trip.departDate &&
+      trip.returnDate < trip.departDate;
+
+    const canContinue =
+      !!trip.departDate &&
+      (tripType === "oneway" || !!trip.returnDate) &&
+      !invalidReturn;
+
+    return (
+      <div>
+        <style>{`
+          /* Make the date picker icon larger/more visible (Chrome/Edge/Safari) */
+          input[type="date"] {
+            font-size: 18px;
+            padding: 10px 12px;
+          }
+          input[type="date"]::-webkit-calendar-picker-indicator {
+            opacity: 1;
+            transform: scale(1.6);
+            cursor: pointer;
+          }
+          /* Big, obvious calendar button */
+          .calBtn{
+  font-size:18px;
+  padding:10px 14px;
+  min-width:120px;
+  border:2px solid #93c5fd;
+  border-radius:10px;
+  background:#2563eb;
+  color:#ffffff;
+  font-weight:700;
+  cursor:pointer;
+}
+          .row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 8px;
+          }
+          label { display: block; margin-top: 10px; }
+        `}.calBtn:hover{background:#1d4ed8}
+.calBtn:focus{outline:3px solid #fbbf24; outline-offset:2px}
+</style>
+
+        <h2>Trip type</h2>
+        <select
+          value={tripType}
+          onChange={(e) => {
+            const nextType = e.target.value;
+            setTrip({
+              ...trip,
+              tripType: nextType,
+              returnDate: nextType === "oneway" ? "" : trip.returnDate,
+            });
+          }}
+        >
+          <option value="oneway">One-way</option>
+          <option value="roundtrip">Round-trip</option>
+        </select>
+
+        <h2>Flight dates</h2>
+
+        <label>Departure date</label>
+        <div className="row">
+          <input
+            ref={departRef}
+            type="date"
+            min={departMin}
+            value={trip.departDate || ""}
+            onChange={(e) => {
+              const d = e.target.value;
+              const newReturn =
+                tripType === "roundtrip" &&
+                trip.returnDate &&
+                d &&
+                trip.returnDate < d
+                  ? ""
+                  : trip.returnDate;
+              setTrip({ ...trip, departDate: d, returnDate: newReturn });
+            }}
+          />
+          <button type="button" className="calBtn" onClick={() => openPicker(departRef)}>
+            ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¦
+          </button>
+        </div>
+
+        {tripType === "roundtrip" && (
+          <>
+            <label>Return date</label>
+            <div className="row">
+              <input
+                ref={returnRef}
+                type="date"
+                min={returnMin}
+                value={trip.returnDate || ""}
+                onChange={(e) => setTrip({ ...trip, returnDate: e.target.value })}
+              />
+              <button type="button" className="calBtn" onClick={() => openPicker(returnRef)}>
+                ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¦
+              </button>
+            </div>
+          </>
+        )}
+
+        {invalidReturn && (
+          <div style={{ color: "crimson", marginTop: 8 }}>
+            Return date canÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢t be before departure date.
+          </div>
+        )}
+
+        <div style={{ marginTop: 12 }}>
+          <button onClick={() => setStep(0)}>Back</button>{" "}
+          <button
+            disabled={!canContinue}
+            onClick={() => {
+              setStep(2);
+              setTravelerIndex(0);
+              setTStep(0);
+            }}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------- Traveler flow ----------------
+  if (step === 2) {
+    const name = t0.label || `Traveler ${travelerIndex + 1}`;
+
+    // 0) label
+    if (tStep === 0) {
+      return (
+        <div>
+          <h2>Who's coming? ({`Traveler ${travelerIndex + 1}`})</h2>
+          <input
+            placeholder='Label (e.g., "Dad")'
+            value={t0.label || ""}
+            onChange={(e) => setTraveler({ label: e.target.value })}
+          />
+          <button
+            onClick={() => {
+              if (travelerIndex === 0) setStep(1);
+              else setTStep(3); // short-flow back target
+            }}
+          >
+            Back
+          </button>
+          <button disabled={!t0.label} onClick={() => setTStep(1)}>
+            Next
+          </button>
+        </div>
+      );
+    }
+
+    // 1) age
+    if (tStep === 1) {
+      return (
+        <div>
+          <h2>{name}: Age range?</h2>
+          <select
+            value={t0.ageRange || ""}
+            onChange={(e) => setTraveler({ ageRange: e.target.value })}
+          >
+            <option value="">Select</option>
+            <option value="65-74">65-74</option>
+            <option value="75-84">75-84</option>
+            <option value="85+">85+</option>
+          </select>
+          <button onClick={() => setTStep(0)}>Back</button>
+          <button disabled={!t0.ageRange} onClick={() => setTStep(2)}>
+            Next
+          </button>
+        </div>
+      );
+    }
+
+    // 2) stamina
+    if (tStep === 2) {
+      return (
+        <div>
+          <h2>{name}: Mobility / stamina?</h2>
+          <select
+            value={t0.stamina || ""}
+            onChange={(e) => setTraveler({ stamina: e.target.value })}
+          >
+            <option value="">Select</option>
+            <option value="walksEasily">Walks easily</option>
+            <option value="needsExtraTime">Needs extra time</option>
+            <option value="usesCaneWalker">Uses cane/walker</option>
+            <option value="wheelchairAirport">Wheelchair at airport</option>
+          </select>
+
+          <button onClick={() => setTStep(1)}>Back</button>
+          <button disabled={!t0.stamina} onClick={() => setTStep(isPrimary ? 4 : 3)}>
+            Next
+          </button>
+        </div>
+      );
+    }
+
+    // 3) add another traveler? (SHORT FLOW)
+    if (tStep === 3 && !isPrimary) {
+      return (
+        <div>
+          <h2>Add another traveler?</h2>
+          <div style={{ marginBottom: 12 }}>
+            <strong>Current travelers:</strong>
+            <ul>
+              {travelers.map((t, i) => (
+                <li key={i}>
+                  {i + 1}. {t.label || `Traveler ${i + 1}`} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {t.ageRange || "age?"},{" "}
+                  {t.stamina || "mobility?"}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <button onClick={() => setTStep(2)}>Back</button>
+
+          <button
+            onClick={() => {
+              const nextTravelers = [...travelers, { ...defaultTraveler }];
+              setTrip({ ...trip, travelers: nextTravelers });
+              setTravelerIndex(nextTravelers.length - 1);
+              setTStep(0);
+            }}
+          >
+            Yes, add traveler
+          </button>
+
+          <button onClick={() => setStep(99)}>No, continue to review</button>
+        </div>
+      );
+    }
+
+    // 4) assistance (PRIMARY ONLY)
+    if (tStep === 4 && isPrimary) {
+      return (
+        <div>
+          <h2>{name}: Assistance needs?</h2>
+          {[
+            ["wheelchairAirport", "Wheelchair at airport"],
+            ["gateEscort", "Escort/assistance to gate"],
+            ["preboard", "Preboarding help"],
+            ["helpWithBags", "Help with bags"],
+          ].map(([v, label]) => (
+            <label key={v} style={{ display: "block" }}>
+              <input
+                type="checkbox"
+                checked={(t0.assistance ?? []).includes(v)}
+                onChange={() => setTraveler({ assistance: toggle(t0.assistance, v) })}
+              />{" "}
+              {label}
+            </label>
+          ))}
+          <button onClick={() => setTStep(2)}>Back</button>
+          <button onClick={() => setTStep(5)}>Next</button>
+        </div>
+      );
+    }
+
+    // 5) comfort (PRIMARY ONLY)
+    if (tStep === 5 && isPrimary) {
+      return (
+        <div>
+          <h2>{name}: Comfort preferences?</h2>
+          {[
+            ["aisleSeat", "Prefer aisle seat"],
+            ["extraLegroom", "Extra legroom if available"],
+            ["nearRestroom", "Sit near restroom"],
+            ["quietZone", "Prefer quieter area (front if possible)"],
+          ].map(([v, label]) => (
+            <label key={v} style={{ display: "block" }}>
+              <input
+                type="checkbox"
+                checked={(t0.comfort ?? []).includes(v)}
+                onChange={() => setTraveler({ comfort: toggle(t0.comfort, v) })}
+              />{" "}
+              {label}
+            </label>
+          ))}
+          <button onClick={() => setTStep(4)}>Back</button>
+          <button onClick={() => setTStep(6)}>Next</button>
+        </div>
+      );
+    }
+
+    // 6) timing & connections (PRIMARY ONLY)
+    if (tStep === 6 && isPrimary) {
+      const timing = t0.timing ?? defaultTraveler.timing;
+      const connections = t0.connections ?? defaultTraveler.connections;
+
+      return (
+        <div>
+          <h2>{name}: Timing & connections</h2>
+
+          <h3>Timing</h3>
+          <label style={{ display: "block" }}>
+            <input
+              type="checkbox"
+              checked={!!timing.avoidEarly}
+              onChange={(e) => setTiming({ avoidEarly: e.target.checked })}
+            />{" "}
+            Avoid early morning departures
+          </label>
+          <label style={{ display: "block" }}>
+            <input
+              type="checkbox"
+              checked={!!timing.avoidLate}
+              onChange={(e) => setTiming({ avoidLate: e.target.checked })}
+            />{" "}
+            Avoid late night arrivals
+          </label>
+          <label style={{ display: "block" }}>
+            <input
+              type="checkbox"
+              checked={!!timing.redEyeOk}
+              onChange={(e) => setTiming({ redEyeOk: e.target.checked })}
+            />{" "}
+            Red-eye is OK
+          </label>
+
+          <h3>Connections</h3>
+          <label style={{ display: "block" }}>
+            <input
+              type="checkbox"
+              checked={!!connections.nonstopOnly}
+              onChange={(e) => {
+                const nonstopOnly = e.target.checked;
+                setConnections({
+                  nonstopOnly,
+                  maxStops: nonstopOnly ? 0 : (connections.maxStops ?? 1),
+                });
+              }}
+            />{" "}
+            Nonstop only
+          </label>
+
+          <label style={{ display: "block" }}>
+            Max stops:{" "}
+            <select
+              value={connections.maxStops ?? 1}
+              disabled={!!connections.nonstopOnly}
+              onChange={(e) => setConnections({ maxStops: toInt(e.target.value, 1) })}
+            >
+              <option value={0}>0</option>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+            </select>
+          </label>
+
+          <label style={{ display: "block" }}>
+            Minimum layover (minutes):{" "}
+            <input
+              type="number"
+              min="30"
+              step="5"
+              value={connections.minLayoverMin ?? 90}
+              onChange={(e) => setConnections({ minLayoverMin: toInt(e.target.value, 90) })}
+            />
+          </label>
+
+          <button onClick={() => setTStep(5)}>Back</button>
+          <button onClick={() => setTStep(7)}>Next</button>
+        </div>
+      );
+    }
+
+    // 7) add another traveler? (PRIMARY)
+    if (tStep === 7 && isPrimary) {
+      return (
+        <div>
+          <h2>Add another traveler?</h2>
+          <div style={{ marginBottom: 12 }}>
+            <strong>Current travelers:</strong>
+            <ul>
+              {travelers.map((t, i) => (
+                <li key={i}>{i + 1}. {t.label || `Traveler ${i + 1}`}</li>
+              ))}
+            </ul>
+          </div>
+
+          <button onClick={() => setTStep(6)}>Back</button>
+
+          <button
+            onClick={() => {
+              const nextTravelers = [...travelers, { ...defaultTraveler }];
+              setTrip({ ...trip, travelers: nextTravelers });
+              setTravelerIndex(nextTravelers.length - 1);
+              setTStep(0);
+            }}
+          >
+            Yes, add traveler
+          </button>
+
+          <button onClick={() => setStep(99)}>No, continue to review</button>
+        </div>
+      );
+    }
+  }
+
+  // ---------------- Review ----------------
+  if (step === 99) {
+    return (
+      <div>
+        <h2>Review</h2>
+        <pre>{JSON.stringify(trip, null, 2)}</pre>
+        <button
+          onClick={() => {
+            setStep(2);
+            setTravelerIndex(Math.max(0, travelers.length - 1));
+            setTStep(travelers.length <= 1 ? 7 : 3);
+          }}
+        >
+          Back
+        </button>
+      </div>
+    );
+  }
+
+  return null;
+}

@@ -1,0 +1,11 @@
+HTTP/1.1 200 OK
+server: Netlify
+x-nf-request-id: 01KGFMT4TKYWPMZR77WF6BY19S
+etag: W/"241-9AhpdC4NpoxINv0Hreb4Ds6yNYQ"
+vary: Origin
+content-type: text/html
+cache-control: no-cache
+date: Mon, 02 Feb 2026 17:01:10 GMT
+connection: close
+content-length: 577
+

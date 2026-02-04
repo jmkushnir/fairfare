@@ -1,0 +1,28 @@
+# Local Netlify folder
+.netlify
+
+.env
+
+
+_rescue/
+
+
+_rescue/
+
+
+# local secrets
+.env
+.env.*
+# logs / zips / backups
+*.log
+*.zip
+*.bak*
+*_debug_*.txt
+*_snips*.txt
+*_lines_*.txt
+ranked_option_*.json
+netlify-dev.log
+# deps / build
+node_modules/
+dist/
+.netlify/

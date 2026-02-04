@@ -1,0 +1,926 @@
+﻿const SHOW_DEBUG = import.meta.env.DEV;
+
+import { useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { emptyTrip } from "../models/intakeDefaults";
+import { AIRPORTS } from "../data/airports";
+
+function normalizeAirport(v) {
+  const s = (v || "").trim().toUpperCase();
+  if (!s) return "";
+  const m = s.match(/^([A-Z]{3})/);
+  return m ? m[1] : s;
+}
+
+function airportLabel(a) {
+  if (!a) return "";
+  const code = (a.code || "").toUpperCase();
+  const city = a.city ? ` — ${a.city}` : "";
+  const name = a.name ? ` (${a.name})` : "";
+  return `${code}${city}${name}`.trim();
+}
+const defaultTraveler = {
+  label: "",
+  ageRange: "",
+  stamina: "",
+  assistance: [],
+  comfort: [],
+  pets: { hasPet: false, hasServiceAnimal: false, inCabinRequired: false },
+};
+
+const defaultFlightPrefs = {
+  timing: { avoidEarly: false, avoidLate: false, redEyeOk: false },
+  connections: { nonstopOnly: false, maxStops: 1, minLayoverMin: 90 },
+};
+
+const defaultExtras = {
+  needHotel: false,
+  needCar: false,
+  needOtherTransport: false,
+  notes: "",
+};
+
+export default function IntakeWizard() {
+  const initialTrip = useMemo(() => {
+    const t = emptyTrip ?? {};
+    const travelers =
+      Array.isArray(t.travelers) && t.travelers.length ? t.travelers : [defaultTraveler];
+    const flightPrefs = t.flightPrefs ?? defaultFlightPrefs;
+    const extras = t.extras ?? defaultExtras;
+    return { ...t, travelers, flightPrefs, extras };
+  }, []);
+
+  const [trip, setTrip] = useState(initialTrip);
+
+  // step: 0 welcome, 1 route, 2 dates, 3 extras, 4 shared flight prefs, 5 traveler flow, 99 review, 100 next
+  const [step, setStep] = useState(0);
+
+  const [datePage, setDatePage] = useState("depart"); // "depart" | "return"
+
+  // welcome gating
+  const [ack, setAck] = useState(false);
+  const navigate = useNavigate();
+// traveler flow:
+  // Primary (index 0): label(0), age(1), stamina(2), pets(3), assistance(4), comfort(5), add-another(6)
+  // Others (index 1+): label(0), age(1), stamina(2), pets(3), add-another(4)
+  const [travelerIndex, setTravelerIndex] = useState(0);
+  const [tStep, setTStep] = useState(0);
+
+  const travelers = Array.isArray(trip.travelers) ? trip.travelers : [defaultTraveler];
+  const t0 = travelers[travelerIndex] ?? defaultTraveler;
+  const isPrimary = travelerIndex === 0;
+
+  // Date picker refs
+  const departRef = useRef(null);
+  const returnRef = useRef(null);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const departMin = today;
+  const returnMin = trip.departDate || today;
+
+  const openPicker = (ref) => {
+    const el = ref?.current;
+    if (!el) return;
+    if (typeof el.showPicker === "function") el.showPicker();
+    else el.focus();
+  };
+
+  const toggle = (arr, v) => {
+    const a = arr ?? [];
+    return a.includes(v) ? a.filter((x) => x !== v) : [...a, v];
+  };
+
+  const setTraveler = (patch) => {
+    const next = travelers.map((t, i) => (i === travelerIndex ? { ...t, ...patch } : t));
+    setTrip({ ...trip, travelers: next });
+  };
+
+  const setPets = (patch) =>
+    setTraveler({
+      pets: { ...(t0.pets ?? defaultTraveler.pets), ...patch },
+    });
+
+  const flightPrefs = trip.flightPrefs ?? defaultFlightPrefs;
+
+  const setFlightPrefs = (patch) =>
+    setTrip({ ...trip, flightPrefs: { ...flightPrefs, ...patch } });
+
+  const setTiming = (patch) =>
+    setFlightPrefs({
+      timing: { ...(flightPrefs.timing ?? defaultFlightPrefs.timing), ...patch },
+    });
+
+  const setConnections = (patch) =>
+    setFlightPrefs({
+      connections: { ...(flightPrefs.connections ?? defaultFlightPrefs.connections), ...patch },
+    });
+
+  const extras = trip.extras ?? defaultExtras;
+  const setExtras = (patch) => setTrip({ ...trip, extras: { ...extras, ...patch } });
+
+  const toInt = (val, fallback) => {
+    const n = parseInt(val, 10);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  const CalIcon = () => (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+      <line x1="16" y1="2" x2="16" y2="6"></line>
+      <line x1="8" y1="2" x2="8" y2="6"></line>
+      <line x1="3" y1="10" x2="21" y2="10"></line>
+    </svg>
+  );
+
+  // ---------------- Step 0: Welcome ----------------
+  if (step === 0) {
+    return (
+      <div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+          <img
+            src="/logo.png"
+            alt="CareCompass FairFare"
+            style={{ width: 220, height: "auto" }}
+          />
+        </div>
+
+        <h2>Welcome to CareCompass FairFare</h2>
+
+        <div style={{ color: "var(--muted)", fontSize: 16, lineHeight: 1.4 }}>
+          <p style={{ marginTop: 0, color: "var(--text)" }}>
+            This is a <strong>beta</strong> version for evaluation purposes.
+          </p>
+          <ul style={{ marginTop: 0 }}>
+            <li>Information only  not a booking engine.</li>
+            <li>Prices/availability can change quickly; verify on airline sites.</li>
+            <li>Not medical advice; for accessibility needs, confirm with the airline.</li>
+            <li>Do not enter sensitive personal information.</li>
+          </ul>
+        </div>
+
+        <label style={{ display: "block", marginTop: 14 }}>
+          <input
+            type="checkbox"
+            checked={ack}
+            onChange={(e) => setAck(e.target.checked)}
+          />{" "}
+          I understand this is a beta and I will verify details before booking.
+        </label>
+
+        <div style={{ marginTop: 14 }}>
+          <button disabled={!ack} onClick={() => setStep(1)}>
+            Start
+          </button>
+        </div>
+
+        <div style={{ marginTop: 10, fontSize: 14, opacity: 0.75 }}>
+          Tip: You can go back at any time.
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------- Step 1: route ----------------
+  if (step === 1) {
+  const quick = AIRPORTS.slice(0, 12);
+  const fromCode = trip.from || "";
+  const toCode = trip.to || "";
+
+  const fromA = AIRPORTS.find((a) => a.code === fromCode);
+  const toA = AIRPORTS.find((a) => a.code === toCode);
+
+  const pick = (which, code) => setTrip({ ...trip, [which]: code });
+  const swap = () => setTrip({ ...trip, from: toCode, to: fromCode });
+
+  return (
+    <div>
+      <h2>Where are you flying from and to?</h2>
+
+      <div style={{ marginTop: 6, marginBottom: 10, color: "var(--muted)", fontSize: 16 }}>
+        Tip: Type a city or airport code, or tap a quick button below.
+      </div>
+
+      <label style={{ fontSize: 18 }}>From</label>
+      <input
+        list="airportList"
+        placeholder="Type city or code (example: PHX)"
+        value={fromCode}
+        onChange={(e) => setTrip({ ...trip, from: normalizeAirport(e.target.value) })}
+        style={{ fontSize: 20 }}
+      />
+      {fromA ? (
+        <div style={{ marginTop: 6, color: "var(--muted)", fontSize: 15 }}>
+          Selected: {airportLabel(fromA)}
+        </div>
+      ) : null}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+        <button type="button" className="secondary" onClick={() => setTrip({ ...trip, from: "" })}>
+          Clear From
+        </button>
+        <button type="button" className="secondary" onClick={swap} disabled={!fromCode || !toCode}>
+          Swap
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+        {quick.map((a) => (
+          <button
+            type="button"
+            className="secondary"
+            key={"from-" + a.code}
+            onClick={() => pick("from", a.code)}
+          >
+            {a.code}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ height: 14 }} />
+
+      <label style={{ fontSize: 18 }}>To</label>
+      <input
+        list="airportList"
+        placeholder="Type city or code (example: LAX)"
+        value={toCode}
+        onChange={(e) => setTrip({ ...trip, to: normalizeAirport(e.target.value) })}
+        style={{ fontSize: 20 }}
+      />
+      {toA ? (
+        <div style={{ marginTop: 6, color: "var(--muted)", fontSize: 15 }}>
+          Selected: {airportLabel(toA)}
+        </div>
+      ) : null}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+        <button type="button" className="secondary" onClick={() => setTrip({ ...trip, to: "" })}>
+          Clear To
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+        {quick.map((a) => (
+          <button
+            type="button"
+            className="secondary"
+            key={"to-" + a.code}
+            onClick={() => pick("to", a.code)}
+          >
+            {a.code}
+          </button>
+        ))}
+      </div>
+
+      <datalist id="airportList">
+        {AIRPORTS.map((a) => (
+          <option key={a.code} value={airportLabel(a)} />
+        ))}
+      </datalist>
+
+      <div style={{ marginTop: 14 }}>
+        <button
+          disabled={(fromCode || "").length < 3 || (toCode || "").length < 3}
+          onClick={() => setStep(2)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
+    // ---------------- Step 2: dates ----------------
+  if (step === 2) {
+    const invalidReturn =
+      tripType === "roundtrip" &&
+      trip.returnDate &&
+      trip.departDate &&
+      trip.returnDate < trip.departDate;
+
+    const onDepartPage = datePage !== "return";
+    const canContinueDepart = !!trip.departDate;
+    const canContinueReturn =
+      tripType === "oneway" || (!!trip.returnDate && !invalidReturn);
+
+    return (
+      <div>
+        <style>{`
+          input[type="date"]{ font-size:18px; padding:10px 12px; }
+          input[type="date"]::-webkit-calendar-picker-indicator{ opacity:1; transform:scale(1.6); cursor:pointer; }
+
+          .row{ display:flex; align-items:center; gap:10px; margin-top:8px; }
+          label{ display:block; margin-top:10px; }
+
+          .calBtn{
+            display:flex; align-items:center; justify-content:center; gap:10px;
+            font-size:18px; padding:10px 14px; min-width:170px;
+            border:2px solid #93c5fd; border-radius:10px;
+            background:#2563eb; color:#ffffff; font-weight:800; cursor:pointer;
+          }
+          .calBtn:hover{background:#1d4ed8}
+          .calBtn:focus{outline:3px solid #fbbf24; outline-offset:2px}
+        `}</style>
+
+        <h2>Trip type</h2>
+        <select
+          value={tripType}
+          onChange={(e) => {
+            const nextType = e.target.value;
+            setTrip({
+              ...trip,
+              tripType: nextType,
+              returnDate: nextType === "oneway" ? "" : trip.returnDate,
+            });
+            if (nextType === "oneway") setDatePage("depart");
+          }}
+        >
+          <option value="oneway">One-way</option>
+          <option value="roundtrip">Round-trip</option>
+        </select>
+
+        {onDepartPage ? (
+          <>
+            <h2>Departure date</h2>
+
+            <label>Departure date</label>
+            <div className="row">
+              <input
+                ref={departRef}
+                type="date"
+                min={departMin}
+                value={trip.departDate || ""}
+                onChange={(e) => {
+                  const d = e.target.value;
+                  const newReturn =
+                    tripType === "roundtrip" && trip.returnDate && d && trip.returnDate < d
+                      ? ""
+                      : trip.returnDate;
+                  setTrip({ ...trip, departDate: d, returnDate: newReturn });
+                }}
+              />
+              <button type="button" className="calBtn" onClick={() => openPicker(departRef)}>
+                <CalIcon /> <span>Pick date</span>
+              </button>
+            </div>
+
+            {invalidReturn && (
+              <div style={{ color: "crimson", marginTop: 8 }}>
+                Return date cant be before departure date.
+              </div>
+            )}
+
+            <div style={{ marginTop: 12 }}>
+              <button onClick={() => setStep(1)}>Back</button>{" "}
+              <button
+                disabled={!canContinueDepart}
+                onClick={() => {
+                  if (tripType === "roundtrip") setDatePage("return");
+                  else setStep(3);
+                }}
+              >
+                Next
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2>Return date</h2>
+
+            <div style={{ marginTop: 6, marginBottom: 6, color: "var(--muted)", fontSize: 16 }}>
+              Departure: <strong>{trip.departDate || ""}</strong>
+            </div>
+
+            <label>Return date</label>
+            <div className="row">
+              <input
+                ref={returnRef}
+                type="date"
+                min={returnMin}
+                value={trip.returnDate || ""}
+                onChange={(e) => setTrip({ ...trip, returnDate: e.target.value })}
+              />
+              <button type="button" className="calBtn" onClick={() => openPicker(returnRef)}>
+                <CalIcon /> <span>Pick date</span>
+              </button>
+            </div>
+
+            {invalidReturn && (
+              <div style={{ color: "crimson", marginTop: 8 }}>
+                Return date cant be before departure date.
+              </div>
+            )}
+
+            <div style={{ marginTop: 12 }}>
+              <button onClick={() => setDatePage("depart")}>Back</button>{" "}
+              <button disabled={!canContinueReturn} onClick={() => setStep(3)}>
+                Next
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+
+// ---------------- Step 3: extras ----------------
+  if (step === 3) {
+    return (
+      <div>
+        <h2>Do you need help with hotels or ground transport?</h2>
+
+        <label style={{ display: "block" }}>
+          <input
+            type="checkbox"
+            checked={!!extras.needHotel}
+            onChange={(e) => setExtras({ needHotel: e.target.checked })}
+          />{" "}
+          Hotel
+        </label>
+
+        <label style={{ display: "block" }}>
+          <input
+            type="checkbox"
+            checked={!!extras.needCar}
+            onChange={(e) => setExtras({ needCar: e.target.checked })}
+          />{" "}
+          Rental car
+        </label>
+
+        <label style={{ display: "block" }}>
+          <input
+            type="checkbox"
+            checked={!!extras.needOtherTransport}
+            onChange={(e) => setExtras({ needOtherTransport: e.target.checked })}
+          />{" "}
+          Other transport (shuttle, taxi, train, rideshare, etc.)
+        </label>
+
+        <label style={{ display: "block", marginTop: 12 }}>
+          Notes (optional)
+          <textarea
+            value={extras.notes || ""}
+            onChange={(e) => setExtras({ notes: e.target.value })}
+            rows={4}
+            style={{
+              width: "100%",
+              maxWidth: 560,
+              marginTop: 8,
+              background: "#061425",
+              color: "#F9FAFB", caretColor: "#F9FAFB",
+              border: "2px solid rgba(255,255,255,0.25)",
+              borderRadius: 12,
+              padding: 12,
+              fontSize: 18,
+            }}
+            placeholder='Example: "Hotel near airport" or "Need wheelchair-friendly shuttle"'
+          />
+        </label>
+
+        <div style={{ marginTop: 12 }}>
+          <button onClick={() => setStep(2)}>Back</button>{" "}
+          <button onClick={() => setStep(4)}>Next</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------- Step 4: shared flight prefs ----------------
+  if (step === 4) {
+    const timing = flightPrefs.timing ?? defaultFlightPrefs.timing;
+    const connections = flightPrefs.connections ?? defaultFlightPrefs.connections;
+
+    return (
+      <div>
+        <h2>Timing & connections (applies to everyone)</h2>
+
+        <h3>Timing</h3>
+        <label style={{ display: "block" }}>
+          <input
+            type="checkbox"
+            checked={!!timing.avoidEarly}
+            onChange={(e) => setTiming({ avoidEarly: e.target.checked })}
+          />{" "}
+          Avoid early morning departures
+        </label>
+        <label style={{ display: "block" }}>
+          <input
+            type="checkbox"
+            checked={!!timing.avoidLate}
+            onChange={(e) => setTiming({ avoidLate: e.target.checked })}
+          />{" "}
+          Avoid late night arrivals
+        </label>
+        <label style={{ display: "block" }}>
+          <input
+            type="checkbox"
+            checked={!!timing.redEyeOk}
+            onChange={(e) => setTiming({ redEyeOk: e.target.checked })}
+          />{" "}
+          Red-eye is OK
+        </label>
+
+        <h3>Connections</h3>
+        <label style={{ display: "block" }}>
+          <input
+            type="checkbox"
+            checked={!!connections.nonstopOnly}
+            onChange={(e) => {
+              const nonstopOnly = e.target.checked;
+              setConnections({
+                nonstopOnly,
+                maxStops: nonstopOnly ? 0 : (connections.maxStops ?? 1),
+              });
+            }}
+          />{" "}
+          Nonstop only
+        </label>
+
+        <label style={{ display: "block" }}>
+          Max stops:{" "}
+          <select
+            value={connections.maxStops ?? 1}
+            disabled={!!connections.nonstopOnly}
+            onChange={(e) => setConnections({ maxStops: toInt(e.target.value, 1) })}
+          >
+            <option value={0}>0</option>
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+          </select>
+        </label>
+
+        <label style={{ display: "block" }}>
+          Minimum layover (minutes):{" "}
+          <input
+            type="number"
+            min="30"
+            step="5"
+            value={connections.minLayoverMin ?? 90}
+            onChange={(e) => setConnections({ minLayoverMin: toInt(e.target.value, 90) })}
+          />
+        </label>
+
+        <div style={{ marginTop: 12 }}>
+          <button onClick={() => setStep(3)}>Back</button>{" "}
+          <button
+            onClick={() => {
+              setStep(5);
+              setTravelerIndex(0);
+              setTStep(0);
+            }}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------- Step 5: traveler flow ----------------
+  if (step === 5) {
+    const name = t0.label || `Traveler ${travelerIndex + 1}`;
+    const pets = t0.pets ?? defaultTraveler.pets;
+
+    if (tStep === 0) {
+      return (
+        <div>
+          <h2>Who's coming? ({`Traveler ${travelerIndex + 1}`})</h2>
+          <input
+            placeholder='Label (e.g., "Dad")'
+            value={t0.label || ""}
+            onChange={(e) => setTraveler({ label: e.target.value })}
+          />
+          <button onClick={() => (travelerIndex === 0 ? setStep(4) : setTStep(isPrimary ? 6 : 4))}>
+            Back
+          </button>
+          <button disabled={!t0.label} onClick={() => setTStep(1)}>
+            Next
+          </button>
+        </div>
+      );
+    }
+
+    if (tStep === 1) {
+      return (
+        <div>
+          <h2>{name}: Age range?</h2>
+          <select
+            value={t0.ageRange || ""}
+            onChange={(e) => setTraveler({ ageRange: e.target.value })}
+          >
+            <option value="">Select</option>
+            <option value="65-74">65-74</option>
+            <option value="75-84">75-84</option>
+            <option value="85+">85+</option>
+          </select>
+          <button onClick={() => setTStep(0)}>Back</button>
+          <button disabled={!t0.ageRange} onClick={() => setTStep(2)}>
+            Next
+          </button>
+        </div>
+      );
+    }
+
+    if (tStep === 2) {
+      return (
+        <div>
+          <h2>{name}: Mobility / stamina?</h2>
+          <select
+            value={t0.stamina || ""}
+            onChange={(e) => setTraveler({ stamina: e.target.value })}
+          >
+            <option value="">Select</option>
+            <option value="walksEasily">Walks easily</option>
+            <option value="needsExtraTime">Needs extra time</option>
+            <option value="usesCaneWalker">Uses cane/walker</option>
+            <option value="wheelchairAirport">Wheelchair at airport</option>
+          </select>
+
+          <button onClick={() => setTStep(1)}>Back</button>
+          <button disabled={!t0.stamina} onClick={() => setTStep(3)}>
+            Next
+          </button>
+        </div>
+      );
+    }
+
+    if (tStep === 3) {
+      const anyAnimal = !!pets.hasPet || !!pets.hasServiceAnimal;
+
+      return (
+        <div>
+          <h2>{name}: Pets & service animals</h2>
+
+          <label style={{ display: "block" }}>
+            <input
+              type="checkbox"
+              checked={!!pets.hasPet}
+              onChange={(e) => {
+                const hasPet = e.target.checked;
+                setPets({
+                  hasPet,
+                  inCabinRequired: hasPet
+                    ? pets.inCabinRequired
+                    : (pets.hasServiceAnimal ? pets.inCabinRequired : false),
+                });
+              }}
+            />{" "}
+            Traveling with a pet
+          </label>
+
+          <label style={{ display: "block" }}>
+            <input
+              type="checkbox"
+              checked={!!pets.hasServiceAnimal}
+              onChange={(e) => {
+                const hasServiceAnimal = e.target.checked;
+                setPets({
+                  hasServiceAnimal,
+                  inCabinRequired: hasServiceAnimal ? true : (pets.hasPet ? pets.inCabinRequired : false),
+                });
+              }}
+            />{" "}
+            Traveling with a service animal
+          </label>
+
+          <label style={{ display: "block", opacity: anyAnimal ? 1 : 0.6 }}>
+            <input
+              type="checkbox"
+              disabled={!anyAnimal}
+              checked={!!pets.inCabinRequired}
+              onChange={(e) => setPets({ inCabinRequired: e.target.checked })}
+            />{" "}
+            Must be in cabin
+          </label>
+
+          <button onClick={() => setTStep(2)}>Back</button>
+          <button onClick={() => setTStep(isPrimary ? 4 : 4)}>Next</button>
+        </div>
+      );
+    }
+
+    if (tStep === 4 && !isPrimary) {
+      return (
+        <div>
+          <h2>Add another traveler?</h2>
+          <button onClick={() => setTStep(3)}>Back</button>
+          <button
+            onClick={() => {
+              const nextTravelers = [...travelers, { ...defaultTraveler }];
+              setTrip({ ...trip, travelers: nextTravelers });
+              setTravelerIndex(nextTravelers.length - 1);
+              setTStep(0);
+            }}
+          >
+            Yes, add traveler
+          </button>
+          <button onClick={() => setStep(99)}>No, continue to review</button>
+        </div>
+      );
+    }
+
+    if (tStep === 4 && isPrimary) {
+      return (
+        <div>
+          <h2>{name}: Assistance needs?</h2>
+          {[
+            ["wheelchairAirport", "Wheelchair at airport"],
+            ["gateEscort", "Escort/assistance to gate"],
+            ["preboard", "Preboarding help"],
+            ["helpWithBags", "Help with bags"],
+          ].map(([v, label]) => (
+            <label key={v} style={{ display: "block" }}>
+              <input
+                type="checkbox"
+                checked={(t0.assistance ?? []).includes(v)}
+                onChange={() => setTraveler({ assistance: toggle(t0.assistance, v) })}
+              />{" "}
+              {label}
+            </label>
+          ))}
+          <button onClick={() => setTStep(3)}>Back</button>
+          <button onClick={() => setTStep(5)}>Next</button>
+        </div>
+      );
+    }
+
+    if (tStep === 5 && isPrimary) {
+      return (
+        <div>
+          <h2>{name}: Comfort preferences?</h2>
+          {[
+            ["aisleSeat", "Prefer aisle seat"],
+            ["extraLegroom", "Extra legroom if available"],
+            ["nearRestroom", "Sit near restroom"],
+            ["quietZone", "Prefer quieter area (front if possible)"],
+          ].map(([v, label]) => (
+            <label key={v} style={{ display: "block" }}>
+              <input
+                type="checkbox"
+                checked={(t0.comfort ?? []).includes(v)}
+                onChange={() => setTraveler({ comfort: toggle(t0.comfort, v) })}
+              />{" "}
+              {label}
+            </label>
+          ))}
+          <button onClick={() => setTStep(4)}>Back</button>
+          <button onClick={() => setTStep(6)}>Next</button>
+        </div>
+      );
+    }
+
+    if (tStep === 6 && isPrimary) {
+      return (
+        <div>
+          <h2>Add another traveler?</h2>
+          <button onClick={() => setTStep(5)}>Back</button>
+          <button
+            onClick={() => {
+              const nextTravelers = [...travelers, { ...defaultTraveler }];
+              setTrip({ ...trip, travelers: nextTravelers });
+              setTravelerIndex(nextTravelers.length - 1);
+              setTStep(0);
+            }}
+          >
+            Yes, add traveler
+          </button>
+          <button onClick={() => setStep(99)}>No, continue to review</button>
+        </div>
+      );
+    }
+  }
+
+  // ---------------- Step 99: Review ----------------
+  if (step === 99) {
+    const fp = trip.flightPrefs ?? defaultFlightPrefs;
+    const tripType = trip.tripType || "roundtrip";
+    const timing = fp.timing ?? defaultFlightPrefs.timing;
+    const conn = fp.connections ?? defaultFlightPrefs.connections;
+
+    const timingLabel = [
+      timing.avoidEarly ? "Avoid early departures" : null,
+      timing.avoidLate ? "Avoid late arrivals" : null,
+      timing.redEyeOk ? "Red-eye OK" : null,
+    ].filter(Boolean);
+
+    const connLabel = conn.nonstopOnly
+      ? "Nonstop only"
+      : `Up to ${conn.maxStops ?? 1} stop(s), min layover ${conn.minLayoverMin ?? 90} min`;
+
+    const extrasList = [
+      extras.needHotel ? "Hotel" : null,
+      extras.needCar ? "Rental car" : null,
+      extras.needOtherTransport ? "Other transport" : null,
+    ].filter(Boolean);
+
+    return (
+      <div>
+        <h2>Review</h2>
+
+        <h3>Trip</h3>
+        <ul>
+          <li>
+            <strong>From:</strong> {trip.from || ""} <strong>To:</strong> {trip.to || ""}
+          </li>
+          <li><strong>Type:</strong> {tripType}</li>
+          <li>
+            <strong>Depart:</strong> {trip.departDate || ""}
+            {tripType === "roundtrip" && (
+              <>
+                {" "}
+                <strong>Return:</strong> {trip.returnDate || ""}
+              </>
+            )}
+          </li>
+        </ul>
+
+        <h3>Extras</h3>
+        <ul>
+          <li><strong>Needs:</strong> {extrasList.length ? extrasList.join(", ") : "None"}</li>
+          {extras.notes ? <li><strong>Notes:</strong> {extras.notes}</li> : null}
+        </ul>
+
+        <h3>Shared flight preferences (everyone)</h3>
+        <ul>
+          <li><strong>Timing:</strong> {timingLabel.length ? timingLabel.join(", ") : "No timing restrictions"}</li>
+          <li><strong>Connections:</strong> {connLabel}</li>
+        </ul>
+
+        <h3>Travelers</h3>
+        <ol>
+          {(trip.travelers ?? []).map((t, i) => {
+            const p = t.pets ?? defaultTraveler.pets;
+            const animalLabel = p.hasServiceAnimal ? "Service animal" : p.hasPet ? "Pet" : "None";
+            return (
+              <li key={i} style={{ marginBottom: 10 }}>
+                <div><strong>{t.label || `Traveler ${i + 1}`}</strong></div>
+                <div>Age: {t.ageRange || ""}</div>
+                <div>Mobility: {t.stamina || ""}</div>
+                <div>
+  Animals: {animalLabel}
+  {(p.hasPet || p.hasServiceAnimal)
+    ? (p.inCabinRequired ? " (in cabin required)" : " (no cabin requirement selected)")
+    : ""}
+</div>
+                {i === 0 && (
+                  <>
+                    <div>Assistance: {(t.assistance ?? []).length ? (t.assistance ?? []).join(", ") : "None selected"}</div>
+                    <div>Comfort: {(t.comfort ?? []).length ? (t.comfort ?? []).join(", ") : "None selected"}</div>
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+
+        <button
+          onClick={() => {
+            setStep(5);
+            setTravelerIndex(Math.max(0, travelers.length - 1));
+            setTStep(travelers.length <= 1 ? 6 : 4);
+          }}
+        >
+          Back
+        </button>{" "}
+        <button onClick={() => { localStorage.setItem("fairfareTrip", JSON.stringify(trip)); navigate("/results"); }}>Continue</button>
+
+        {SHOW_DEBUG && (
+          <details style={{ marginTop: 12 }}>
+            <summary>Show raw data</summary>
+            {import.meta.env.DEV && <pre>{JSON.stringify(trip, null, 2)}</pre>}
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  if (step === 100) {
+    return (
+      <div>
+        <h2>Next step</h2>
+        <button onClick={() => setStep(99)}>Back</button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+
+
+
+
+
+
+

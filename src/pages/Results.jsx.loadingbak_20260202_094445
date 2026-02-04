@@ -1,0 +1,147 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { planFlights } from "../lib/api";
+
+function fmtTime(s){
+  if(!s) return "—";
+  try { return new Date(s).toLocaleString([], { year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }); }
+  catch { return String(s); }
+}
+function fmtDur(s){
+  if(!s) return "—";
+  return String(s).replace(/^PT/,"").replace("H","h ").replace("M","m").toLowerCase();
+}
+
+export default function Results() {
+  const location = useLocation();
+
+  const inputs = useMemo(() => {
+    const qs = new URLSearchParams(location.search || "");
+    const fromQuery = {
+      origin: qs.get("origin"),
+      destination: qs.get("destination"),
+      departureDate: qs.get("departureDate"),
+    };
+
+    const fromStorage = (() => { try { return JSON.parse(localStorage.getItem("fairfareTrip") || "null") || {}; } catch { return {}; } })();
+    const fromState = (location.state || {});
+    return {
+      origin: fromQuery.origin || fromState.origin || fromState.from || fromStorage.origin || fromStorage.from || null,
+      destination: fromQuery.destination || fromState.destination || fromState.to || fromStorage.destination || fromStorage.to || null,
+      departureDate: fromQuery.departureDate || fromState.departureDate || fromState.departDate || fromState.date || fromStorage.departureDate || fromStorage.departDate || fromStorage.date || null,
+      returnDate: fromQuery.returnDate || fromState.returnDate || fromState.return || fromStorage.returnDate || fromStorage.return || null,
+    };
+  }, [location.search, location.state]);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      setError("");
+      setResult(null);
+
+      const { origin, destination, departureDate, returnDate } = inputs;
+
+      if (!origin || !destination || !departureDate) {
+        setError("Missing required inputs (origin, destination, departureDate).");
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const data = await planFlights({ origin, destination, departureDate, returnDate });
+        if (!cancelled) setResult(data);
+      } catch (e) {
+        if (!cancelled) setError(e?.message || "Request failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [inputs]);
+
+  const ranked = result?.data?.ranked_options || result?.ranked_options || [];
+  const notes = result?.data?.notes || result?.notes || [];
+
+  return (
+    <div style={{ padding: 16, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" }}>
+      <h1>Results</h1>
+
+      <div style={{ marginBottom: 12 }}>
+        <div><strong>From:</strong> {inputs.origin || "—"}</div>
+        <div><strong>To:</strong> {inputs.destination || "—"}</div>
+        <div><strong>Date:</strong> {inputs.departureDate || "—"}</div>
+        <div><strong>Return:</strong> {inputs.returnDate || "—"}</div>
+      </div>
+
+      {loading && <div>Loading…</div>}
+
+      {!loading && error && (
+        <div style={{ color: "crimson", whiteSpace: "pre-wrap" }}>
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && ranked?.length > 0 && (
+        <div>
+          <h2>Ranked options</h2>
+          <ol>
+            {ranked.map((opt, idx) => (
+              <li key={idx} style={{ marginBottom: 12 }}>
+                <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 10, background: opt.highlight ? "#fff7e6" : "#fff" }}>
+  <div style={{ fontWeight: 700, marginBottom: 6 }}>{opt.label || `Option ${idx+1}`}</div>
+
+  {opt.summary && (
+    <div style={{ lineHeight: 1.35 }}>
+      <div><strong>Outbound:</strong> {opt.summary.from} → {opt.summary.to}</div>
+      <div>Depart: {fmtTime(opt.summary.depart_at)} • Arrive: {fmtTime(opt.summary.arrive_at)}</div>
+      <div>Duration: {opt.summary.duration || fmtDur(opt.summary.duration)} • Stops: {opt.summary.stops} • Carrier: {opt.summary.carrier}</div>
+    </div>
+  )}
+
+  {opt.return_summary && (
+    <div style={{ lineHeight: 1.35, marginTop: 8 }}>
+      <div><strong>Return:</strong> {opt.return_summary.from} → {opt.return_summary.to}</div>
+      <div>Depart: {fmtTime(opt.return_summary.depart_at)} • Arrive: {fmtTime(opt.return_summary.arrive_at)}</div>
+      <div>Duration: {opt.return_summary.duration || fmtDur(opt.return_summary.duration)} • Stops: {opt.return_summary.stops} • Carrier: {opt.return_summary.carrier}</div>
+    </div>
+  )}
+
+  <details style={{ marginTop: 8 }}>
+    <summary>Raw JSON</summary>
+    <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(opt, null, 2)}</pre>
+  </details>
+</div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {!loading && !error && notes?.length > 0 && (
+        <div>
+          <h2>Notes</h2>
+          <ul>
+            {notes.map((n, idx) => (
+              <li key={idx}>
+                {typeof n === "string" ? n : <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(n, null, 2)}</pre>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {!loading && !error && ranked?.length === 0 && (
+        <div>No flight options returned.</div>
+      )}
+    </div>
+  );
+}
